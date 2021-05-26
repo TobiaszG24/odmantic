@@ -3,6 +3,9 @@
         members:
           - parse_doc
           - doc
+          - update
+          - copy
+          - dict
 
 ::: odmantic.model.Model
     selection:

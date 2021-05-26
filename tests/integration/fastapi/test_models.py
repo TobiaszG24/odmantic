@@ -1,3 +1,4 @@
+from datetime import datetime
 from inspect import getdoc
 from typing import Type
 
@@ -26,7 +27,7 @@ def test_object_id_fastapi_get_query(fastapi_app, test_client):
 def test_object_id_fastapi_get_query_invalid_id(fastapi_app, test_client):
     @fastapi_app.get("/{id}")
     def get(id: ObjectId):
-        return "ok"
+        return "ok"  # pragma: no cover
 
     invalid_oid_str = "a"
     response = test_client.get(f"/{invalid_oid_str}")
@@ -98,10 +99,11 @@ def test_openapi_json_with_bson_fields(fastapi_app, test_client):
         decimal: Decimal128
         binary: Binary
         regex: Regex
+        datetime_: datetime
 
     @fastapi_app.get("/", response_model=ODMModel)
     def get():
-        return None
+        return None  # pragma: no cover
 
     response = test_client.get("/openapi.json")
     assert response.status_code == 200
@@ -180,7 +182,7 @@ def test_openapi_json_references(fastapi_app, test_client):
 
     @fastapi_app.get("/", response_model=Base)
     def get():
-        return None
+        return None  # pragma: no cover
 
     response = test_client.get("/openapi.json")
     assert response.status_code == 200

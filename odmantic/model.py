@@ -32,6 +32,7 @@ from pydantic.error_wrappers import ErrorWrapper, ValidationError
 from pydantic.fields import Field as PDField
 from pydantic.fields import FieldInfo as PDFieldInfo
 from pydantic.fields import Undefined
+from pydantic.main import BaseModel
 from pydantic.tools import parse_obj_as
 from pydantic.typing import is_classvar, resolve_annotations
 from pydantic.utils import lenient_issubclass
@@ -141,7 +142,11 @@ def is_type_mutable(type_: Type) -> bool:
         return not lenient_issubclass(type_origin, _IMMUTABLE_TYPES)
     else:
         return not (
-            type_ is None or lenient_issubclass(type_, _IMMUTABLE_TYPES)  # type:ignore
+            type_ is None  # type:ignore
+            or (
+                lenient_issubclass(type_, _IMMUTABLE_TYPES)
+                and not lenient_issubclass(type_, EmbeddedModel)
+            )
         )
 
 
@@ -235,6 +240,9 @@ class BaseModelMetaclass(pydantic.main.ModelMetaclass):
             if isinstance(value, PDFieldInfo):
                 raise TypeError("please use odmantic.Field instead of pydantic.Field")
 
+            if is_type_mutable(field_type):
+                mutable_fields.add(field_name)
+
             if lenient_issubclass(field_type, EmbeddedModel):
                 if isinstance(value, ODMFieldInfo):
                     namespace[field_name] = value.pydantic_field_info
@@ -266,8 +274,6 @@ class BaseModelMetaclass(pydantic.main.ModelMetaclass):
                 references.append(field_name)
                 del namespace[field_name]  # Remove default ODMReferenceInfo value
             else:
-                if is_type_mutable(field_type):
-                    mutable_fields.add(field_name)
                 if isinstance(value, ODMFieldInfo):
                     key_name = (
                         value.key_name if value.key_name is not None else field_name
@@ -451,7 +457,7 @@ class EmbeddedModelMetaclass(BaseModelMetaclass):
         return super().__new__(mcs, name, bases, namespace, **kwargs)
 
 
-TBase = TypeVar("TBase", bound="_BaseODMModel")
+BaseT = TypeVar("BaseT", bound="_BaseODMModel")
 
 
 class _BaseODMModel(pydantic.BaseModel, metaclass=ABCMeta):
@@ -477,7 +483,7 @@ class _BaseODMModel(pydantic.BaseModel, metaclass=ABCMeta):
         object.__setattr__(self, "__fields_modified__", set(self.__odm_fields__.keys()))
 
     @classmethod
-    def validate(cls: Type[TBase], value: Any) -> TBase:
+    def validate(cls: Type[BaseT], value: Any) -> BaseT:
         if isinstance(value, cls):
             # Do not copy the object as done in pydantic
             # This enable to keep the same python object
@@ -495,26 +501,148 @@ class _BaseODMModel(pydantic.BaseModel, metaclass=ABCMeta):
         return args
 
     def copy(
-        self: TBase,
+        self: BaseT,
         *,
         include: Union[None, "AbstractSetIntStr", "MappingIntStrAny"] = None,
         exclude: Union[None, "AbstractSetIntStr", "MappingIntStrAny"] = None,
         update: Optional["DictStrAny"] = None,
         deep: bool = False,
-    ) -> TBase:
-        """WARNING: Not Implemented"""
-        # TODO implement
-        raise NotImplementedError
+    ) -> BaseT:
+        """Duplicate a model, optionally choose which fields to include, exclude and
+        change.
+
+        Danger:
+            The data is not validated before creating the new model: **you should trust
+            this data**.
+
+        Arguments:
+            include: fields to include in new model
+            exclude: fields to exclude from new model, as with values this takes
+                precedence over include
+            update: values to change/add in the new model.
+            deep: set to `True` to make a deep copy of the model
+
+        Note:
+            The `include` and `exclude` kwargs are only affecting the copied data,
+            not filtering the update object.
+
+        Returns:
+            new model instance
+
+        """
+        copied = super().copy(
+            include=include, exclude=exclude, update=update, deep=deep  # type: ignore
+        )
+        object.__setattr__(copied, "__fields_modified__", set(copied.__fields__))
+        return copied
+
+    def update(
+        self,
+        patch_object: Union[BaseModel, Dict[str, Any]],
+        *,
+        include: Union[None, "AbstractSetIntStr", "MappingIntStrAny"] = None,
+        exclude: Union[None, "AbstractSetIntStr", "MappingIntStrAny"] = None,
+        exclude_unset: bool = True,
+        exclude_defaults: bool = False,
+        exclude_none: bool = False,
+    ) -> None:
+        """Update instance fields from a Pydantic model or a dictionary.
+
+        If a pydantic model is provided, only the **fields set** will be
+        applied by default.
+
+        Args:
+            patch_object: object containing the values to update
+            include: fields to include from the `patch_object` (include all fields if
+                `None`)
+            exclude: fields to exclude from the `patch_object`, this takes
+                precedence over include
+            exclude_unset: only update fields explicitly set in the patch object (only
+                applies to Pydantic models)
+            exclude_defaults: only update fields that are different from their default
+                value in the patch object (only applies to Pydantic models)
+            exclude_none: only update fields different from None in the patch object
+                (only applies to Pydantic models)
+
+        Raises:
+            ValidationError: the modifications would make the instance invalid
+
+        <!--
+        #noqa: DAR402 ValidationError
+        -->
+        """
+        if isinstance(patch_object, BaseModel):
+            patch_dict = patch_object.dict(
+                include=include,  # type: ignore
+                exclude=exclude,  # type: ignore
+                exclude_unset=exclude_unset,
+                exclude_defaults=exclude_defaults,
+                exclude_none=exclude_none,
+            )
+        else:
+            odm_fields = set(self.__odm_fields__.keys())
+            patch_dict = {}
+            for k, v in patch_object.items():
+                if include is not None and k not in include:
+                    continue
+                if exclude is not None and k in exclude:
+                    continue
+                if k not in odm_fields:
+                    continue
+                patch_dict[k] = v
+        patched_instance_dict = {**self.dict(), **patch_dict}
+        # FIXME: improve performance by only running updated field validators and then
+        # model validators
+        patched_instance = self.validate(patched_instance_dict)
+        for name, new_value in patched_instance.__dict__.items():
+            if self.__dict__[name] != new_value:
+                # Manually change the field to avoid running the validators again
+                self.__dict__[name] = new_value
+                self.__fields_set__.add(name)
+                self.__fields_modified__.add(name)
 
     def __setattr__(self, name: str, value: Any) -> None:
         super().__setattr__(name, value)
         self.__fields_modified__.add(name)
 
+    def dict(  # type: ignore # Missing deprecated/ unsupported parameters
+        self,
+        *,
+        include: Union["AbstractSetIntStr", "MappingIntStrAny"] = None,  # type: ignore
+        exclude: Union["AbstractSetIntStr", "MappingIntStrAny"] = None,  # type: ignore
+        exclude_unset: bool = False,
+        exclude_defaults: bool = False,
+        exclude_none: bool = False,
+        by_alias: bool = False,  # FIXME when aliases are supported
+    ) -> "DictStrAny":
+        """Generate a dictionary representation of the model, optionally specifying
+        which fields to include or exclude.
+
+        Args:
+            include: fields to include (include all fields if `None`)
+            exclude: fields to exclude this takes precedence over include
+            exclude_unset: only include fields explicitly set
+            exclude_defaults: only include fields that are different from their default
+                value
+            exclude_none: only include fields different from `None`
+            by_alias: **not supported yet**
+
+        Returns:
+            the dictionary representation of the instance
+        """
+        return super().dict(
+            include=include,
+            exclude=exclude,
+            exclude_unset=exclude_unset,
+            exclude_defaults=exclude_defaults,
+            exclude_none=exclude_none,
+        )
+
     def doc(self, include: Optional["AbstractSetIntStr"] = None) -> Dict[str, Any]:
         """Generate a document representation of the instance (as a dictionary).
 
         Args:
-            include: field that should be included; if None, all the field will be
+            include: field that should be included; if None, every fields will be
                 included
 
         Returns:
@@ -537,7 +665,7 @@ class _BaseODMModel(pydantic.BaseModel, metaclass=ABCMeta):
         return doc
 
     @classmethod
-    def parse_doc(cls: Type[TBase], raw_doc: Dict) -> TBase:
+    def parse_doc(cls: Type[BaseT], raw_doc: Dict) -> BaseT:
         """Parse a BSON document into an instance of the Model
 
         Args:
@@ -569,7 +697,7 @@ class _BaseODMModel(pydantic.BaseModel, metaclass=ABCMeta):
 
     @classmethod
     def _parse_doc_to_obj(
-        cls: Type[TBase], raw_doc: Dict, base_loc: Tuple[str, ...] = ()
+        cls: Type[BaseT], raw_doc: Dict, base_loc: Tuple[str, ...] = ()
     ) -> Tuple[ErrorList, Dict[str, Any]]:
         errors: ErrorList = []
         obj: Dict[str, Any] = {}
@@ -628,6 +756,42 @@ class Model(_BaseODMModel, metaclass=ModelMetaclass):
                 "Reassigning a new primary key is not supported yet"
             )
         super().__setattr__(name, value)
+
+    def update(
+        self,
+        patch_object: Union[BaseModel, Dict[str, Any]],
+        *,
+        include: Union[None, "AbstractSetIntStr", "MappingIntStrAny"] = None,
+        exclude: Union[None, "AbstractSetIntStr", "MappingIntStrAny"] = None,
+        exclude_unset: bool = True,
+        exclude_defaults: bool = False,
+        exclude_none: bool = False,
+    ) -> None:
+        is_primary_field_in_patch = (
+            isinstance(patch_object, BaseModel)
+            and self.__primary_field__ in patch_object.__fields__
+        ) or (isinstance(patch_object, dict) and self.__primary_field__ in patch_object)
+        if is_primary_field_in_patch:
+            if (
+                include is None
+                and (exclude is None or self.__primary_field__ not in exclude)
+            ) or (
+                include is not None
+                and self.__primary_field__ in include
+                and (exclude is None or self.__primary_field__ not in exclude)
+            ):
+                raise ValueError(
+                    "Updating the primary key is not supported. "
+                    "See the copy method if you want to modify the primary field."
+                )
+        return super().update(
+            patch_object,
+            include=include,
+            exclude=exclude,
+            exclude_unset=exclude_unset,
+            exclude_defaults=exclude_defaults,
+            exclude_none=exclude_none,
+        )
 
 
 class EmbeddedModel(_BaseODMModel, metaclass=EmbeddedModelMetaclass):

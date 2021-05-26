@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ODMantic"
-version = "0.3.1"
+version = "0.3.5"
 description = "ODMantic, an AsyncIO MongoDB Object Document Mapper for Python using type hints "
 authors = ["Arthur Pastel <arthur.pastel@gmail.com>"]
 license = "ISC License"
@@ -38,36 +38,38 @@ include = ["LICENSE", "README.md"]
 
 [tool.poetry.dependencies]
 python = ">=3.6,<4.0"
-importlib-metadata = { version = "^1.0", python = "<3.8" }
+importlib-metadata = { version = ">=1,<5", python = "<3.8" }
 typing-extensions = { version = "^3.7.4.3", python = "<3.8" }
-pydantic = ">=1.6.0,< 1.8.0"
-motor = ">=2.1.0,<2.4.0"
-fastapi = { version = "^0.61.1", optional = true }
+pydantic = ">=1.6.2,!=1.7,!=1.7.1,!=1.7.2,!=1.7.3,!=1.8,!=1.8.1,<1.9.0"
+motor = ">=2.1.0,<2.5.0"
+fastapi = { version = ">=0.61.1,<0.64.0", optional = true }
 
 [tool.poetry.extras]
 fastapi = ["fastapi"]
 
 [tool.poetry.dev-dependencies]
 pytest = "~=6.0"
-isort = "~=5.6.4"
+isort = "~=5.8.0"
 black = { version = "*", allow-prereleases = true }
-flake8 = "==3.8.3"
-mypy = "^0.782"
+flake8 = "~=3.9.0"
+mypy = "^0.812"
 coverage = { extras = ["toml"], version = "^5.3" }
 pytest-xdist = "^2.1.0"
-pytz = "^2020.1"
+pytz = "^2021.1"
 asyncmock = "^0.4.2"
-mkdocstrings = "^0.13.2"
-pydocstyle = "^5.1.1"
+mkdocstrings = "^0.15.0"
+pydocstyle = "^6.0.0"
 darglint = "^1.5.4"
 ipython = "^7.16.1"
-pytest-asyncio = "^0.14.0"
-mkdocs-material = "^6.0.2"
-uvicorn = "^0.12.1"
-fastapi = "^0.61.1"
+pytest-asyncio = "^0.15.0"
+mkdocs-material = "^7.0.3"
+uvicorn = "^0.13.0"
+fastapi = ">=0.61.1,<0.64.0"
 requests = "^2.24.0"
 typer = "^0.3.2"
 semver = "^2.13.0"
+pytest-testmon = "^1.0.3"
+async-asgi-testclient = "^1.4.4"
 
 [build-system]
 requires = ["poetry>=0.12"]
@@ -79,7 +81,7 @@ multi_line_output = 3
 include_trailing_comma = true
 use_parentheses = true
 force_grid_wrap = 0
-known_third_party = ["bson", "click", "fastapi", "motor", "pydantic", "pytest", "pytz", "semver", "typer", "uvicorn"]
+float_to_top = true
 known_first_party = ["odmantic", "tests"]
 skip = ["docs"]
 
@@ -92,5 +94,6 @@ filterwarnings = [
 [tool.coverage.run]
 branch = true
 [tool.coverage.report]
-include = ["odmantic/*"]
-exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:"]
+include = ["odmantic/*", "tests/*"]
+omit = ["**/conftest.py"]
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "@pytest.mark.skip"]

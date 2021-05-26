@@ -654,59 +654,70 @@ instance. Once we have the instance, we call the
 ### Updating a tree
 
 We already defined a `PUT` route that enables us to modify (replace) a tree instance.
-However, with this previopus implementation, it's not possible to specify only the
+However, with this previous implementation, it's not possible to specify only the
 fields that we want to change as the whole Tree instance is rebuilt from the request's
 body.
 
-In this example, we will define a `PATCH` method that will allow us to modify some
-fields of a Tree instance:
+In this example, we will define a `PATCH` method that will allow us to modify only some
+specific fields of a Tree instance:
 
-```python linenums="1" hl_lines="29-32 35-45"
+```python linenums="1" hl_lines="26-29 32-39"
 --8<-- "usage_fastapi/example_update.py"
 ```
 First, we define the `TreePatchSchema` this Pydantic model will contain the
 modifications that we need to apply on the instance. Since we want to be able to update
-each field independently, we make them all non required (i.e. `Optional`) in the schema.
+each field independently, we give each of them the `None` default value.
+
 
 Then, we configure a new `PATCH` endpoint by setting the `id` of the model to update
 as a path parameter and the `TreePatchSchema` as the request body parameter.
 
-Once all the parameters have been validated properly and the associated instance have
-been gathered, we can apply the modifications to the model.
+After all the parameters have been validated properly and the appropriate instance have
+been gathered, we can apply the modifications to the local instance using the
+[Model.update][odmantic.model._BaseODMModel.update] method. By default, the update
+method will replace each field values in the instance with the ones explicitely set in
+the patch object. Thus, the fields containing the None default values are not gonna be
+changed in the instance.
 
-The first step is to create a dictionnary containing only the fields to modify (the
-`exclude_unset` argument helps us to gather only the fields that have been set from the
-request's body):
 
-```python
-patch_dict = patch.dict(exclude_unset=True)
-```
+We can then finish by saving and returning the updated tree.
 
-The next step is to iterate over this dictionary to apply the changes to the model
-iteratively:
+??? tip "Optional, defaults, non-required and required pydantic fields (advanced)"
 
-```python
-for name, value in patch_dict.items():
-    setattr(tree, name, value)
-```
-
-!!! tip "Using setattr to update an instance"
-    Here we use the `setattr` builtin function to update the instance attributes.
-
-    For example:
     ```python
-    setattr(tree, "average_size", 21.5)
-    ```
-    will have exactly the same effect as:
-    ```python
-    tree.average_size = 21.5
+    from pydantic import BaseModel
+
+    class M(BaseModel):
+        a: Optional[int]
+        b: Optional[int] = None
+        c: int = None
+        d: int
     ```
 
-Once our tree has been properly patched, we can save it and return it's updated version.
-```python
-await engine.save(tree)
-return tree
-```
+    In this example, fields have a different behavior:
+
+    `#!python a: Optional[int]`
+    : this field is **not required**, `None` is its default value, it can be given
+      `None` or any `int` values
+
+    `#!python b: Optional[int] = None`
+    : same behavior as `a` since `None` is set automatically as the default value for
+      `typing.Optional` fields
+
+    `#!python c: int = None`
+    : this field is **not required**, if not explicitely provided it will take the
+      `None` value, **only** an `int` can be given as an explicit value
+
+    `#!python d: int`
+    : this field is **required** and an `int` value **must** be provided
+
+    (More details: [pydantic #1223](https://github.com/samuelcolvin/pydantic/issues/1223#issuecomment-594632324){:target=blank_},
+     [pydantic: Required fields](https://pydantic-docs.helpmanual.io/usage/models/#required-fields){:target=blank_})
+
+    By default [Model.update][odmantic.model._BaseODMModel.update], will not apply
+    values from unset (not explicitely populated) fields. Since we don't want to allow
+    explicitely set `None` values in the example, we used fields defined as
+    `#!python c: int = None`.
 
 !!! example "Updating a tree from the command line"
     === "HTTPie"
@@ -784,6 +795,6 @@ Some ideas that should arrive soon:
   document is not found an exception will be raised directly.
 - Implement the equivalent of MongoDB insert method to be able to create document
   without overwriting existing ones.
-- Implement a Model.update method to update the model fields from a dictionnary or from
-  a Pydantic schema.
+- <del>Implement a Model.update method to update the model fields from a dictionnary or from
+  a Pydantic schema.</del>
 - Automatically generate CRUD endpoints directly from an ODMantic Model.

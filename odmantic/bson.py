@@ -27,8 +27,7 @@ class ObjectId(bson.ObjectId):
     def __modify_schema__(cls, field_schema: Dict) -> None:
         field_schema.update(
             examples=["5f85f36d6dfecacc68428a46", "ffffffffffffffffffffffff"],
-            example="ffffffffffffffffffffffff",
-            description="MongoDB ObjectId string",
+            example="5f85f36d6dfecacc68428a46",
             type="string",
         )
 
@@ -130,7 +129,7 @@ class _Pattern:
         return a
 
 
-class _datetime:
+class _datetime(datetime):
     @classmethod
     def __get_validators__(cls):  # type: ignore
         yield cls.validate
@@ -144,10 +143,14 @@ class _datetime:
         # MongoDB does not store timezone info
         # https://docs.python.org/3/library/datetime.html#determining-if-an-object-is-aware-or-naive
         if d.tzinfo is not None and d.tzinfo.utcoffset(d) is not None:
-            raise ValueError("datetime objects must be naive (no timeone info)")
-        # Round microseconds to the nearest millisecond to comply with Mongo behavior
-        microsecs = round(d.microsecond / 1000) * 1000
+            raise ValueError("datetime objects must be naive (no timezone info)")
+        # Truncate microseconds to milliseconds to comply with Mongo behavior
+        microsecs = d.microsecond - d.microsecond % 1000
         return d.replace(microsecond=microsecs)
+
+    @classmethod
+    def __modify_schema__(cls, field_schema: Dict) -> None:
+        field_schema.update(example=datetime.utcnow().isoformat())
 
 
 class _decimalDecimal(decimal.Decimal):
